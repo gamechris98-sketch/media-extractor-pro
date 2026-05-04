@@ -16,11 +16,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}/ws`;
         
-        console.log(`Connecting to ${wsUrl}`);
         socket = new WebSocket(wsUrl);
 
         socket.onopen = () => {
-            addLog('서버에 연결되었습니다. (안정적인 백엔드 모드)');
+            addLog('서버 연결 성공 (고성능 엔진 모드)');
             statusBadge.innerText = '준비됨';
         };
 
@@ -34,9 +33,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 progressBar.style.width = `${data.percent}%`;
                 percentText.innerText = `${data.percent}%`;
                 currentFileText.innerText = data.filename;
-                statusBadge.innerText = '진행 중';
             } else if (data.type === 'finished') {
-                addLog(`완료: ${data.filename}`, true, data.filename);
+                // 서버에서 받은 직접 다운로드 URL 사용
+                addLog(`추출 성공!`, true, data.direct_url, data.filename);
             } else if (data.type === 'all_done') {
                 statusBadge.innerText = '완료';
                 statusBadge.style.color = '#34C759';
@@ -47,17 +46,12 @@ document.addEventListener('DOMContentLoaded', () => {
         };
 
         socket.onclose = () => {
-            addLog('서버와 연결이 끊어졌습니다. 재시도 중...');
+            addLog('연결이 끊어졌습니다. 재시도 중...');
             setTimeout(connect, 3000);
-        };
-        
-        socket.onerror = (err) => {
-            addLog('WebSocket 연결 오류 발생.');
-            console.error(err);
         };
     }
 
-    function addLog(message, isDownload = false, filename = '') {
+    function addLog(message, isDownload = false, directUrl = '', filename = '') {
         const now = new Date();
         const timeStr = now.getHours().toString().padStart(2, '0') + ':' + 
                         now.getMinutes().toString().padStart(2, '0') + ':' + 
@@ -69,7 +63,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDownload) {
             entry.innerHTML = `<span class="log-time">${timeStr}</span> 
                                <span>${message}</span>
-                               <a href="/downloads/${filename}" download class="download-link">
+                               <a href="${directUrl}" target="_blank" class="download-link">
                                   <i data-lucide="download" style="width:14px; height:14px; vertical-align:middle; margin-left:5px;"></i> 기기에 저장
                                </a>`;
             lucide.createIcons();
@@ -95,12 +89,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (socket && socket.readyState === WebSocket.OPEN) {
             startBtn.disabled = true;
-            startBtn.querySelector('span').innerText = '처리 중...';
-            statusBadge.innerText = '분석 중';
+            startBtn.querySelector('span').innerText = '추출 중...';
+            statusBadge.innerText = '추출 중';
             
             logsContainer.innerHTML = ''; 
             progressContainer.classList.add('hidden');
-            progressBar.style.width = '0%';
             
             socket.send(JSON.stringify({
                 type: 'start',
@@ -108,9 +101,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 format: format
             }));
             
-            addLog(`${urls.length}개의 작업을 서버 대기열에 추가했습니다.`);
+            addLog(`${urls.length}개의 URL 분석을 시작합니다.`);
         } else {
-            addLog('서버와 연결되어 있지 않습니다. 잠시 후 다시 시도해 주세요.');
+            addLog('서버와 연결되어 있지 않습니다.');
         }
     });
 

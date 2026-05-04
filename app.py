@@ -2,27 +2,21 @@ import os
 import asyncio
 import threading
 import json
+import httpx
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-import yt_dlp
 
 app = FastAPI()
 
-# 디렉토리 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
-os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-
-# 정적 파일 설정 (static 폴더 존재 여부 체크 후 마운트)
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# 다운로드 파일 서버
-app.mount("/downloads", StaticFiles(directory=DOWNLOAD_DIR), name="downloads")
+# 외부 고성능 추출 API (Cobalt API)
+API_URL = 'https://api.cobalt.tools/api/json'
 
-# WebSocket 매니저
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -36,59 +30,65 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
-class YdlLogger:
-    def __init__(self, websocket, loop):
-        self.websocket = websocket
-        self.loop = loop
-    def debug(self, msg):
-        if "Extracting" in msg or "[download]" in msg:
-            self.send_log(msg)
-    def warning(self, msg): self.send_log(f"Warning: {msg}")
-    def error(self, msg): self.send_log(f"Error: {msg}")
-    def send_log(self, message):
-        asyncio.run_coroutine_threadsafe(
-            manager.send_personal_message({"type": "log", "message": message}, self.websocket), self.loop
-        )
-
-def download_task(urls, format_type, websocket, loop):
+async def download_task(urls, format_type, websocket, loop):
     is_audio = format_type == "audio"
-    def progress_hook(d):
-        if d['status'] == 'downloading':
-            p = d.get('_percent_str', '0%').replace('%', '').strip()
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for url in urls:
+            if not url: continue
+            
             asyncio.run_coroutine_threadsafe(
-                manager.send_personal_message({"type": "progress", "percent": p, "filename": d.get('filename', '').split('/')[-1]}, websocket), loop
+                manager.send_personal_message({"type": "log", "message": f"분석 중: {url}"}, websocket), loop
             )
-        elif d['status'] == 'finished':
-            asyncio.run_coroutine_threadsafe(
-                manager.send_personal_message({"type": "finished", "filename": d.get('filename', '').split('/')[-1]}, websocket), loop
-            )
+            
+            try:
+                # 외부 API 호출 (서버에서 호출하므로 CORS 문제 없음)
+                response = await client.post(API_URL, json={
+                    "url": url,
+                    "isAudioOnly": is_audio,
+                    "vQuality": "1080",
+                    "filenameStyle": "pretty"
+                }, headers={
+                    "Accept": "application/json",
+                    "Content-Type": "application/json"
+                })
+                
+                result = response.json()
+                
+                if result.get('status') == 'error':
+                    msg = result.get('text', '알 수 없는 오류')
+                    asyncio.run_coroutine_threadsafe(
+                        manager.send_personal_message({"type": "log", "message": f"실패: {msg}"}, websocket), loop
+                    )
+                elif result.get('status') in ['stream', 'redirect']:
+                    # 성공 시 클라이언트에 직접 다운로드 URL 전달
+                    asyncio.run_coroutine_threadsafe(
+                        manager.send_personal_message({
+                            "type": "finished", 
+                            "filename": "다운로드 준비 완료 (클릭)", 
+                            "direct_url": result.get('url')
+                        }, websocket), loop
+                    )
+                elif result.get('status') == 'picker':
+                    asyncio.run_coroutine_threadsafe(
+                        manager.send_personal_message({
+                            "type": "finished", 
+                            "filename": "다운로드 준비 완료 (클릭)", 
+                            "direct_url": result.get('picker')[0].get('url')
+                        }, websocket), loop
+                    )
+            except Exception as e:
+                asyncio.run_coroutine_threadsafe(
+                    manager.send_personal_message({"type": "log", "message": f"오류: {str(e)}"}, websocket), loop
+                )
 
-    for url in urls:
-        if not url: continue
-        ydl_opts = {
-            'outtmpl': f'{DOWNLOAD_DIR}/%(title)s.%(ext)s',
-            'progress_hooks': [progress_hook],
-            'logger': YdlLogger(websocket, loop),
-            'nocheckcertificate': True,
-        }
-        if is_audio:
-            ydl_opts.update({'format': 'bestaudio/best', 'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}]})
-        else:
-            ydl_opts.update({'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best', 'merge_output_format': 'mp4'})
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl: ydl.download([url])
-        except Exception as e:
-            asyncio.run_coroutine_threadsafe(manager.send_personal_message({"type": "log", "message": f"Error: {str(e)}"}, websocket), loop)
-
-    asyncio.run_coroutine_threadsafe(manager.send_personal_message({"type": "all_done", "message": "완료"}, websocket), loop)
+    asyncio.run_coroutine_threadsafe(
+        manager.send_personal_message({"type": "all_done", "message": "완료"}, websocket), loop
+    )
 
 @app.get("/")
 async def get_index():
-    # Jinja2 대신 파일을 직접 전송하여 500 에러 가능성 원천 차단
-    index_path = os.path.join(BASE_DIR, "index.html")
-    if os.path.exists(index_path):
-        return FileResponse(index_path)
-    return HTMLResponse("<h1>index.html Not Found</h1><p>Check if the file is in the root directory.</p>", status_code=404)
+    return FileResponse(os.path.join(BASE_DIR, "index.html"))
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -99,8 +99,10 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             msg = json.loads(data)
             if msg['type'] == 'start':
-                threading.Thread(target=download_task, args=(msg['urls'], msg['format'], websocket, loop)).start()
-    except WebSocketDisconnect: manager.disconnect(websocket)
+                # 비동기 테스크 실행
+                asyncio.create_task(download_task(msg['urls'], msg['format'], websocket, loop))
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
 
 if __name__ == "__main__":
     import uvicorn
