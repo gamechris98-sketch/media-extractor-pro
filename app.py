@@ -14,8 +14,8 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# 외부 고성능 추출 API (Cobalt API)
-API_URL = 'https://api.cobalt.tools/api/json'
+# 최신 Cobalt API (v10)
+API_URL = 'https://api.cobalt.tools/'
 
 class ConnectionManager:
     def __init__(self):
@@ -42,11 +42,11 @@ async def download_task(urls, format_type, websocket, loop):
             )
             
             try:
-                # 외부 API 호출 (서버에서 호출하므로 CORS 문제 없음)
+                # v10 API 명세에 따른 요청 (isAudioOnly 대신 downloadMode 등 사용 가능하나 기본값 유지)
                 response = await client.post(API_URL, json={
                     "url": url,
-                    "isAudioOnly": is_audio,
-                    "vQuality": "1080",
+                    "downloadMode": "audio" if is_audio else "video",
+                    "videoQuality": "1080",
                     "filenameStyle": "pretty"
                 }, headers={
                     "Accept": "application/json",
@@ -55,17 +55,17 @@ async def download_task(urls, format_type, websocket, loop):
                 
                 result = response.json()
                 
+                # v10 응답 처리
                 if result.get('status') == 'error':
                     msg = result.get('text', '알 수 없는 오류')
                     asyncio.run_coroutine_threadsafe(
                         manager.send_personal_message({"type": "log", "message": f"실패: {msg}"}, websocket), loop
                     )
-                elif result.get('status') in ['stream', 'redirect']:
-                    # 성공 시 클라이언트에 직접 다운로드 URL 전달
+                elif result.get('status') in ['stream', 'redirect', 'tunnel']:
                     asyncio.run_coroutine_threadsafe(
                         manager.send_personal_message({
                             "type": "finished", 
-                            "filename": "다운로드 준비 완료 (클릭)", 
+                            "filename": "다운로드 준비 완료", 
                             "direct_url": result.get('url')
                         }, websocket), loop
                     )
@@ -73,7 +73,7 @@ async def download_task(urls, format_type, websocket, loop):
                     asyncio.run_coroutine_threadsafe(
                         manager.send_personal_message({
                             "type": "finished", 
-                            "filename": "다운로드 준비 완료 (클릭)", 
+                            "filename": "다운로드 준비 완료", 
                             "direct_url": result.get('picker')[0].get('url')
                         }, websocket), loop
                     )
@@ -99,7 +99,6 @@ async def websocket_endpoint(websocket: WebSocket):
             data = await websocket.receive_text()
             msg = json.loads(data)
             if msg['type'] == 'start':
-                # 비동기 테스크 실행
                 asyncio.create_task(download_task(msg['urls'], msg['format'], websocket, loop))
     except WebSocketDisconnect:
         manager.disconnect(websocket)
