@@ -10,47 +10,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const percentText = document.getElementById('percent-text');
     const currentFileText = document.getElementById('current-file');
     
-    let socket = null;
+    // 외부 고성능 다운로드 API (Cobalt API 사용)
+    const API_URL = 'https://api.cobalt.tools/api/json';
 
-    function connect() {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        socket = new WebSocket(`${protocol}//${window.location.host}/ws`);
-
-        socket.onopen = () => {
-            console.log('Connected to server');
-            addLog('서버에 연결되었습니다.');
-        };
-
-        socket.onmessage = (event) => {
-            const data = JSON.parse(event.data);
-            
-            if (data.type === 'log') {
-                addLog(data.message);
-            } else if (data.type === 'progress') {
-                progressContainer.classList.remove('hidden');
-                progressBar.style.width = `${data.percent}%`;
-                percentText.innerText = `${data.percent}%`;
-                currentFileText.innerText = data.filename;
-                statusBadge.innerText = '진행 중';
-            } else if (data.type === 'finished') {
-                addLog(`완료: ${data.filename}`, true, data.filename);
-            } else if (data.type === 'all_done') {
-                statusBadge.innerText = '완료';
-                statusBadge.style.color = '#34C759';
-                startBtn.disabled = false;
-                startBtn.querySelector('span').innerText = '추출 시작';
-                addLog('--- 모든 작업이 종료되었습니다 ---');
-            }
-        };
-
-        socket.onclose = () => {
-            console.log('Disconnected from server');
-            addLog('서버와 연결이 끊어졌습니다. 재시도 중...');
-            setTimeout(connect, 3000);
-        };
-    }
-
-    function addLog(message, isDownload = false, filename = '') {
+    function addLog(message, isDownload = false, downloadUrl = '', filename = '') {
         const now = new Date();
         const timeStr = now.getHours().toString().padStart(2, '0') + ':' + 
                         now.getMinutes().toString().padStart(2, '0') + ':' + 
@@ -62,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDownload) {
             entry.innerHTML = `<span class="log-time">${timeStr}</span> 
                                <span>${message}</span>
-                               <a href="/downloads/${filename}" download class="download-link">
+                               <a href="${downloadUrl}" target="_blank" class="download-link">
                                   <i data-lucide="download" style="width:14px; height:14px; vertical-align:middle; margin-left:5px;"></i> 기기에 저장
                                </a>`;
             lucide.createIcons();
@@ -77,35 +40,63 @@ document.addEventListener('DOMContentLoaded', () => {
         logsContainer.scrollTop = logsContainer.scrollHeight;
     }
 
-    startBtn.addEventListener('click', () => {
+    async function downloadMedia(url, isAudio) {
+        try {
+            addLog(`분석 중: ${url}`);
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json'
+                },
+                body: JSON.stringify({
+                    url: url,
+                    isAudioOnly: isAudio,
+                    vQuality: '1080',
+                    filenameStyle: 'pretty'
+                })
+            });
+
+            const result = await response.json();
+
+            if (result.status === 'error') {
+                addLog(`실패: ${result.text || '알 수 없는 오류'}`);
+            } else if (result.status === 'stream' || result.status === 'redirect') {
+                addLog(`추출 성공!`, true, result.url, 'media_file');
+            } else if (result.status === 'picker') {
+                // 여러 결과가 있을 경우 첫 번째 선택
+                addLog(`추출 성공!`, true, result.picker[0].url, 'media_file');
+            }
+        } catch (error) {
+            addLog(`오류 발생: ${error.message}`);
+        }
+    }
+
+    startBtn.addEventListener('click', async () => {
         const urls = urlTextarea.value.trim().split('\n').filter(u => u.trim() !== '');
         if (urls.length === 0) {
             alert('URL을 하나 이상 입력해 주세요.');
             return;
         }
 
-        const format = document.querySelector('input[name="format"]:checked').value;
+        const isAudio = document.querySelector('input[name="format"]:checked').value === 'audio';
 
-        if (socket && socket.readyState === WebSocket.OPEN) {
-            startBtn.disabled = true;
-            startBtn.querySelector('span').innerText = '처리 중...';
-            statusBadge.innerText = '분석 중';
-            
-            logsContainer.innerHTML = ''; // Clear logs
-            progressContainer.classList.add('hidden');
-            progressBar.style.width = '0%';
-            
-            socket.send(json = JSON.stringify({
-                type: 'start',
-                urls: urls,
-                format: format
-            }));
-            
-            addLog(`${urls.length}개의 작업을 대기열에 추가했습니다.`);
-        } else {
-            addLog('서버와 연결되어 있지 않습니다. 잠시 후 다시 시도해 주세요.');
+        startBtn.disabled = true;
+        startBtn.querySelector('span').innerText = '처리 중...';
+        statusBadge.innerText = '추출 중';
+        
+        logsContainer.innerHTML = ''; // 로그 초기화
+        
+        for (const url of urls) {
+            await downloadMedia(url, isAudio);
         }
+
+        statusBadge.innerText = '완료';
+        statusBadge.style.color = '#34C759';
+        startBtn.disabled = false;
+        startBtn.querySelector('span').innerText = '추출 시작';
+        addLog('--- 모든 작업이 종료되었습니다 ---');
     });
 
-    connect();
+    addLog('시스템이 준비되었습니다. 외부 API를 사용하여 GitHub Pages에서 직접 작동합니다.');
 });

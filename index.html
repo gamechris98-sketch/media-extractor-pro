@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Media Extractor Pro - GitHub Pages</title>
+    <link rel="stylesheet" href="static/style.css">
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background"></div>
+    <div class="container">
+        <header>
+            <div class="logo">
+                <i data-lucide="download-cloud" class="icon-logo"></i>
+                <div>
+                    <h1>Media Extractor</h1>
+                    <p>Static Web Edition v2.0 (GitHub Pages)</p>
+                </div>
+            </div>
+        </header>
+
+        <main>
+            <section class="input-section glass">
+                <label for="urls">추출 대상 URL 목록</label>
+                <textarea id="urls" placeholder="https://www.youtube.com/watch?v=...&#10;한 줄에 하나씩 입력해 주세요."></textarea>
+                
+                <div class="controls">
+                    <div class="format-toggle">
+                        <input type="radio" id="video" name="format" value="video" checked>
+                        <label for="video">Video</label>
+                        <input type="radio" id="audio" name="format" value="audio">
+                        <label for="audio">Audio</label>
+                    </div>
+                    <button id="start-btn" class="primary-btn">
+                        <i data-lucide="play"></i>
+                        <span>추출 시작</span>
+                    </button>
+                </div>
+            </section>
+
+            <section class="status-section">
+                <div class="status-header">
+                    <h2>프로세스 로그</h2>
+                    <span id="status-badge" class="badge">준비</span>
+                </div>
+                
+                <div id="progress-container" class="glass hidden">
+                    <div class="progress-info">
+                        <span id="current-file">파일 분석 중...</span>
+                        <span id="percent-text">0%</span>
+                    </div>
+                    <div class="progress-bar-bg">
+                        <div id="progress-bar-fill" class="progress-bar-fill"></div>
+                    </div>
+                </div>
+
+                <div id="log-box" class="log-box glass">
+                    <div id="logs" class="logs">
+                        <p class="empty-msg">대기 중인 작업이 없습니다.</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <footer>
+            <p>© 2026 Media Extractor Pro. Powered by Open API.</p>
+        </footer>
+    </div>
+    <script src="static/script.js"></script>
+</body>
+</html>
