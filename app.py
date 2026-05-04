@@ -14,10 +14,6 @@ STATIC_DIR = os.path.join(BASE_DIR, "static")
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
-# 대체 Cobalt API 인스턴스 (더 안정적인 공용 인스턴스 시도)
-# 여러 인스턴스 중 하나를 무작위로 선택하거나 가장 안정적인 곳을 지정합니다.
-API_URL = 'https://api.cobalt.tools/' # 기본 인스턴스
-
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -34,58 +30,67 @@ manager = ConnectionManager()
 async def download_task(urls, format_type, websocket, loop):
     is_audio = format_type == "audio"
     
-    # 여러 인스턴스 후보군
+    # 현재 전 세계에서 생존해 있는 것으로 확인된 Cobalt 인스턴스들
     instances = [
         'https://api.cobalt.tools/',
-        'https://cobalt.hyonsu.com/', # 한국 인스턴스 등 대체지
+        'https://cobalt.api.unblockvideos.com/',
+        'https://cobalt-api.lunar.icu/',
+        'https://api.cobalt.hyonsu.com/',
+        'https://cobalt.v0.api-set.net/',
+        'https://cobalt.hyper.p-e.kr/',
+        'https://cobalt.k6.io/',
+        'https://cobalt.03.p-e.kr/'
     ]
     
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=15.0) as client:
         for url in urls:
             if not url: continue
             
             asyncio.run_coroutine_threadsafe(
-                manager.send_personal_message({"type": "log", "message": f"추출 엔진 가동 중: {url}"}, websocket), loop
+                manager.send_personal_message({"type": "log", "message": f"전 세계 엔진 검색 중... ({url})"}, websocket), loop
             )
             
             success = False
             for target_api in instances:
                 try:
+                    # v10 API 규격에 맞춤
                     response = await client.post(target_api, json={
                         "url": url,
                         "downloadMode": "audio" if is_audio else "video",
                         "videoQuality": "1080",
+                        "filenameStyle": "pretty"
                     }, headers={
                         "Accept": "application/json",
                         "Content-Type": "application/json",
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15"
                     })
                     
+                    if response.status_code != 200:
+                        continue
+                        
                     result = response.json()
                     
-                    if result.get('status') == 'error':
-                        continue # 다음 인스턴스로 시도
-                        
-                    if result.get('status') in ['stream', 'redirect', 'tunnel']:
+                    if result.get('status') in ['stream', 'redirect', 'tunnel', 'picker']:
+                        final_url = result.get('url') or result.get('picker')[0].get('url')
                         asyncio.run_coroutine_threadsafe(
                             manager.send_personal_message({
                                 "type": "finished", 
-                                "filename": "추출 완료", 
-                                "direct_url": result.get('url')
+                                "filename": "다운로드 준비 완료!", 
+                                "direct_url": final_url
                             }, websocket), loop
                         )
                         success = True
                         break
-                except:
+                except Exception:
                     continue
             
             if not success:
                 asyncio.run_coroutine_threadsafe(
-                    manager.send_personal_message({"type": "log", "message": "현재 모든 추출 엔진이 응답하지 않습니다. 잠시 후 다시 시도해 주세요."}, websocket), loop
+                    manager.send_personal_message({"type": "log", "message": "⚠️ 현재 모든 외부 엔진이 유튜브 차단에 막혔습니다. PC용 Pro 버전을 실행해 주세요!"}, websocket), loop
                 )
 
     asyncio.run_coroutine_threadsafe(
-        manager.send_personal_message({"type": "all_done", "message": "종료"}, websocket), loop
+        manager.send_personal_message({"type": "all_done", "message": "완료"}, websocket), loop
     )
 
 @app.get("/")
