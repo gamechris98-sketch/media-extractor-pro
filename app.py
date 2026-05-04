@@ -3,28 +3,26 @@ import asyncio
 import threading
 import json
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 import yt_dlp
 
 app = FastAPI()
 
-# 디렉토리 설정 (절대 경로 확보)
+# 디렉토리 설정
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# 정적 파일 설정
+# 정적 파일 설정 (static 폴더 존재 여부 체크 후 마운트)
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 if os.path.exists(STATIC_DIR):
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+# 다운로드 파일 서버
 app.mount("/downloads", StaticFiles(directory=DOWNLOAD_DIR), name="downloads")
 
-# 템플릿 설정 (루트 디렉토리 탐색)
-templates = Jinja2Templates(directory=BASE_DIR)
-
+# WebSocket 매니저
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
@@ -84,12 +82,13 @@ def download_task(urls, format_type, websocket, loop):
 
     asyncio.run_coroutine_threadsafe(manager.send_personal_message({"type": "all_done", "message": "완료"}, websocket), loop)
 
-@app.get("/", response_class=HTMLResponse)
-async def get_index(request: Request):
-    # index.html 파일이 실제로 있는지 체크
-    if not os.path.exists(os.path.join(BASE_DIR, "index.html")):
-        return HTMLResponse("index.html file not found in root directory.", status_code=500)
-    return templates.TemplateResponse("index.html", {"request": request})
+@app.get("/")
+async def get_index():
+    # Jinja2 대신 파일을 직접 전송하여 500 에러 가능성 원천 차단
+    index_path = os.path.join(BASE_DIR, "index.html")
+    if os.path.exists(index_path):
+        return FileResponse(index_path)
+    return HTMLResponse("<h1>index.html Not Found</h1><p>Check if the file is in the root directory.</p>", status_code=404)
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
