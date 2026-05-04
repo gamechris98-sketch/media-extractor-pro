@@ -10,8 +10,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const percentText = document.getElementById('percent-text');
     const currentFileText = document.getElementById('current-file');
     
-    // 외부 고성능 다운로드 API (Cobalt API 사용)
-    const API_URL = 'https://api.cobalt.tools/api/json';
+    // CORS 문제를 해결하기 위한 프록시 서버 경유
+    const PROXY_URL = 'https://corsproxy.io/?';
+    const TARGET_API = 'https://api.cobalt.tools/api/json';
 
     function addLog(message, isDownload = false, downloadUrl = '', filename = '') {
         const now = new Date();
@@ -43,7 +44,9 @@ document.addEventListener('DOMContentLoaded', () => {
     async function downloadMedia(url, isAudio) {
         try {
             addLog(`분석 중: ${url}`);
-            const response = await fetch(API_URL, {
+            
+            // 프록시 서버를 통해 요청 전송
+            const response = await fetch(PROXY_URL + encodeURIComponent(TARGET_API), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -57,6 +60,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 })
             });
 
+            if (!response.ok) {
+                throw new Error(`API 응답 오류 (${response.status})`);
+            }
+
             const result = await response.json();
 
             if (result.status === 'error') {
@@ -64,11 +71,11 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (result.status === 'stream' || result.status === 'redirect') {
                 addLog(`추출 성공!`, true, result.url, 'media_file');
             } else if (result.status === 'picker') {
-                // 여러 결과가 있을 경우 첫 번째 선택
                 addLog(`추출 성공!`, true, result.picker[0].url, 'media_file');
             }
         } catch (error) {
             addLog(`오류 발생: ${error.message}`);
+            console.error(error);
         }
     }
 
@@ -85,7 +92,7 @@ document.addEventListener('DOMContentLoaded', () => {
         startBtn.querySelector('span').innerText = '처리 중...';
         statusBadge.innerText = '추출 중';
         
-        logsContainer.innerHTML = ''; // 로그 초기화
+        logsContainer.innerHTML = ''; 
         
         for (const url of urls) {
             await downloadMedia(url, isAudio);
@@ -98,5 +105,5 @@ document.addEventListener('DOMContentLoaded', () => {
         addLog('--- 모든 작업이 종료되었습니다 ---');
     });
 
-    addLog('시스템이 준비되었습니다. 외부 API를 사용하여 GitHub Pages에서 직접 작동합니다.');
+    addLog('시스템 준비 완료 (프록시 모드)');
 });
