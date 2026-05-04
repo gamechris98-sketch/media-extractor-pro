@@ -10,16 +10,20 @@ import yt_dlp
 
 app = FastAPI()
 
-# 디렉토리 설정
+# 디렉토리 설정 (절대 경로 확보)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
-# 정적 파일 및 템플릿 설정
-if os.path.exists(os.path.join(BASE_DIR, "static")):
-    app.mount("/static", StaticFiles(directory=os.path.join(BASE_DIR, "static")), name="static")
+# 정적 파일 설정
+STATIC_DIR = os.path.join(BASE_DIR, "static")
+if os.path.exists(STATIC_DIR):
+    app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
 app.mount("/downloads", StaticFiles(directory=DOWNLOAD_DIR), name="downloads")
-templates = Jinja2Templates(directory=BASE_DIR) # index.html이 루트에 있음
+
+# 템플릿 설정 (루트 디렉토리 탐색)
+templates = Jinja2Templates(directory=BASE_DIR)
 
 class ConnectionManager:
     def __init__(self):
@@ -82,6 +86,9 @@ def download_task(urls, format_type, websocket, loop):
 
 @app.get("/", response_class=HTMLResponse)
 async def get_index(request: Request):
+    # index.html 파일이 실제로 있는지 체크
+    if not os.path.exists(os.path.join(BASE_DIR, "index.html")):
+        return HTMLResponse("index.html file not found in root directory.", status_code=500)
     return templates.TemplateResponse("index.html", {"request": request})
 
 @app.websocket("/ws")
